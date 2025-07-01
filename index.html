@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Poker Genetic Algorithm – Enhanced</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <h1>Using a Genetic Algorithm to find the Best Poker Hand after 40 generations</h1>
+
+  <div style="max-width: 700px; margin: 2rem auto;">
+    <canvas id="fitnessChart"></canvas>
+  </div>
+
+  <script>
+    // Initialize constants
+    const POPULATION_SIZE = 100;
+    const RAND_PARENTS = 5;
+    const PROB_CROSSOVER = 0.6;
+    const INITIAL_MUTATION = 0.2;
+    const TOTAL_GENERATIONS = 40;
+    const ELITE_COUNT = 5;
+
+    let rank = [], suit = [];
+    for (let i = 2; i <= 14; i++) rank[i] = i.toString();
+    rank[11] = "Jack"; rank[12] = "Queen"; rank[13] = "King"; rank[14] = "Ace";
+    suit[0] = "Hearts"; suit[1] = "Diamonds"; suit[2] = "Clubs"; suit[3] = "Spades";
+
+    // Deck and shuffle helpers
+    function createDeck() {
+      const deck = [];
+      for (let r = 2; r <= 14; r++)
+        for (let s = 0; s < 4; s++)
+          deck.push({ rank: r, suit: s });
+      return deck;
+    }
+
+    function shuffle(deck) {
+      for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+      }
+    }
+
+    function generateHand() {
+      const deck = createDeck();
+      shuffle(deck);
+      return deck.slice(0, 5);
+    }
+
+    function generateInitialPopulation() {
+      const pop = [];
+      for (let i = 0; i < POPULATION_SIZE; i++) {
+        const hand = generateHand();
+        const eval = evaluate_hand(hand);
+        pop.push({ hand, rank: eval.rank, fitness: eval.fitness });
+      }
+      return pop;
+    }
+
+    function evaluate_hand(hand) {
+      let rank = 1;
+      if (isRoyalFlush(hand)) rank = 10;
+      else if (isStraightFlush(hand)) rank = 9;
+      else if (isFourOfAKind(hand)) rank = 8;
+      else if (isFullHouse(hand)) rank = 7;
+      else if (isFlush(hand)) rank = 6;
+      else if (isStraight(hand)) rank = 5;
+      else if (isThreeOfAKind(hand)) rank = 4;
+      else if (isTwoPair(hand)) rank = 3;
+      else if (isOnePair(hand)) rank = 2;
+      return { rank, fitness: calc_fitness(rank) };
+    }
+
+    function calc_fitness(rank) {
+      return [0, 0.1, 0.5, 0.7, 1.0, 5.0, 8.0, 12.0, 13.0, 19.0, 35.7][rank];
+    }
+
+    function getRankName(rank) {
+      return ["None", "High Card", "One Pair", "Two Pair", "Three of a Kind", "Straight", "Flush", "Full House", "Four of a Kind", "Straight Flush", "Royal Flush"][rank];
+    }
+
+    function getRankCounts(hand) {
+      const counts = {};
+      for (const card of hand) counts[card.rank] = (counts[card.rank] || 0) + 1;
+      return counts;
+    }
+
+    function isOnePair(hand) {
+      return Object.values(getRankCounts(hand)).filter(c => c === 2).length === 1;
+    }
+
+    function isTwoPair(hand) {
+      return Object.values(getRankCounts(hand)).filter(c => c === 2).length === 2;
+    }
+
+    function isThreeOfAKind(hand) {
+      return Object.values(getRankCounts(hand)).includes(3);
+    }
+
+    function isFourOfAKind(hand) {
+      return Object.values(getRankCounts(hand)).includes(4);
+    }
+
+    function isFullHouse(hand) {
+      const values = Object.values(getRankCounts(hand));
+      return values.includes(3) && values.includes(2);
+    }
+
+    function isFlush(hand) {
+      return hand.every(c => c.suit === hand[0].suit);
+    }
+
+    function isStraight(hand) {
+      const vals = [...new Set(hand.map(c => c.rank))].sort((a, b) => a - b);
+      if (vals.length !== 5) return false;
+      return vals[4] - vals[0] === 4 || JSON.stringify(vals) === JSON.stringify([2, 3, 4, 5, 14]); // Ace-low
+    }
+
+    function isStraightFlush(hand) {
+      return isFlush(hand) && isStraight(hand);
+    }
+
+    function isRoyalFlush(hand) {
+      return isStraightFlush(hand) && hand.some(c => c.rank === 14);
+    }
+
+    function tournamentSelection(pop, k, n) {
+      const winners = [];
+      for (let i = 0; i < n; i++) {
+        const tournament = Array.from({ length: k }, () => pop[Math.floor(Math.random() * pop.length)]);
+        winners.push(tournament.reduce((a, b) => a.fitness > b.fitness ? a : b));
+      }
+      return winners;
+    }
+
+    function crossover(p1, p2) {
+      if (Math.random() > PROB_CROSSOVER) return Math.random() < 0.5 ? [...p1.hand] : [...p2.hand];
+      const [primary, secondary] = Math.random() < 0.5 ? [p1.hand, p2.hand] : [p2.hand, p1.hand];
+      const child = [], used = new Set();
+      const key = card => `${card.rank}-${card.suit}`;
+      while (child.length < 3) {
+        const card = primary[Math.floor(Math.random() * primary.length)];
+        if (!used.has(key(card))) {
+          child.push(card);
+          used.add(key(card));
+        }
+      }
+      while (child.length < 5) {
+        const card = secondary[Math.floor(Math.random() * secondary.length)];
+        if (!used.has(key(card))) {
+          child.push(card);
+          used.add(key(card));
+        }
+      }
+      return child;
+    }
+
+    function mutate(hand, prob) {
+      if (Math.random() > prob) return hand;
+      const deck = createDeck();
+      const handSet = new Set(hand.map(card => `${card.rank}-${card.suit}`));
+      const freshCards = deck.filter(c => !handSet.has(`${c.rank}-${c.suit}`));
+      const replacement = freshCards[Math.floor(Math.random() * freshCards.length)];
+      const replaceIndex = Math.floor(Math.random() * hand.length);
+      hand[replaceIndex] = replacement;
+      return hand;
+    }
+
+    // Evolve!
+    let population = generateInitialPopulation();
+    let fitness_log = [];
+
+    for (let generation = 1; generation <= TOTAL_GENERATIONS; generation++) {
+      const parents = tournamentSelection(population, 5, RAND_PARENTS);
+      let new_population = [];
+
+      let mutationRate = INITIAL_MUTATION;
+      if (generation > 2 && fitness_log[generation - 2] === fitness_log[generation - 3]) mutationRate = 0.5;
+
+      while (new_population.length < POPULATION_SIZE - ELITE_COUNT) {
+        const p1 = parents[Math.floor(Math.random() * parents.length)];
+        const p2 = parents[Math.floor(Math.random() * parents.length)];
+        const child = mutate(crossover(p1, p2), mutationRate);
+        const eval = evaluate_hand(child);
+        new_population.push({ hand: child, rank: eval.rank, fitness: eval.fitness });
+      }
+
+      // Elitism
+      const elites = population.sort((a, b) => b.fitness - a.fitness).slice(0, ELITE_COUNT);
+      new_population.push(...elites);
+      population = new_population;
+
+      const best = population.reduce((a, b) => a.fitness > b.fitness ? a : b);
+      fitness_log.push(best.fitness);
+
+      // Output
+      document.body.innerHTML += `<hr><strong>Generation ${generation}</strong><br>`;
+      best.hand.forEach(card => {
+        document.body.innerHTML += `${rank[card.rank]} of ${suit[card.suit]}<br>`;
+      });
+      document.body.innerHTML += `Rank: ${getRankName(best.rank)}<br>Fitness: ${best.fitness}<br>`;
+      console.log(`Gen ${generation}: Best Fitness = ${best.fitness}`);
+    }
+
+
+      const ctx = document.getElementById('fitnessChart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: Array.from({ length: fitness_log.length }, (_, i) => i + 1),
+        datasets: [{
+          label: 'Best Fitness per Generation',
+          data: fitness_log,
+          borderColor: 'rgba(75, 192, 192, 1)',
+          backgroundColor: 'rgba(75, 192, 192, 0.2)',
+          borderWidth: 2,
+          pointRadius: 3,
+          tension: 0.2
+        }]
+      },
+      options: {
+        scales: {
+          x: { title: { display: true, text: 'Generation' } },
+          y: { title: { display: true, text: 'Best Fitness' }, beginAtZero: true }
+        },
+        plugins: {
+          legend: { display: true },
+          tooltip: { mode: 'index', intersect: false }
+        },
+        responsive: true
+      }
+    });
+
+  </script>
+</body>
+</html>
